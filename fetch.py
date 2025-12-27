@@ -62,7 +62,7 @@ def download_ensap_captchas(num_captchas) -> None:
             filepath = output_dir / filename
             filepath.write_bytes(captcha_binary)
 
-            time.sleep(1.0) # Throttle
+            time.sleep(0.0) # Throttle
 
         browser.close()
 
