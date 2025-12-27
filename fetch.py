@@ -1,28 +1,29 @@
 # Python Standard Library
+import asyncio
 import base64
 import hashlib
-import time
 from pathlib import Path
+import sys
 
 # Third-Party Libraries
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
 JS_image_finder = open("image_finder.js", mode="r", encoding="utf-8").read()
 
 
-def fetch_captcha(page) -> bytes:
-    page.goto(
+async def fetch_captcha(page) -> bytes:
+    await page.goto(
         "https://ensap.gouv.fr",
         wait_until="networkidle",
         timeout=30000,
     )
-    page.wait_for_selector("ensap-captcha", timeout=10000)
-    captcha_element = page.query_selector("ensap-captcha")
+    await page.wait_for_selector("ensap-captcha", timeout=10000)
+    captcha_element = await page.query_selector("ensap-captcha")
 
     if not captcha_element:
         raise RuntimeError("CAPTCHA element not found")
 
-    image_data = page.evaluate(JS_image_finder)
+    image_data = await page.evaluate(JS_image_finder)
 
     if not image_data or not image_data.get("src"):
         raise RuntimeError("No image found in CAPTCHA element")
@@ -34,41 +35,49 @@ def fetch_captcha(page) -> bytes:
     return image_bytes
 
 
-def download_ensap_captchas(num_captchas) -> None:
+async def download_ensap_captchas(num_captchas) -> None:
     """Download CAPTCHA images from ensap.gouv.fr"""
 
     output_dir = Path("./captchas")
     output_dir.mkdir(exist_ok=True)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        page = context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
 
         print(f"Downloading {num_captchas} CAPTCHA images...")
 
-        for i in range(num_captchas):
-            print(f"[{i + 1}/{num_captchas}]")
+        semaphore = asyncio.Semaphore(5)
+        
+        async def download_one(i):
+            async with semaphore:
+                page = await context.new_page()
+                try:
+                    print(f"[{i + 1}/{num_captchas}]")
+                    
+                    try:
+                        captcha_binary = await fetch_captcha(page)
+                    except Exception as e:
+                        print(f"Error fetching CAPTCHA: {e}")
+                        return
+                    
+                    hash_digest = hashlib.sha256(captcha_binary).hexdigest()
+                    filename = f"{hash_digest}.png"
+                    filepath = output_dir / filename
+                    filepath.write_bytes(captcha_binary)
 
-            try:
-                captcha_binary = fetch_captcha(page)
-            except Exception as e:
-                print(f"Error fetching CAPTCHA: {e}")
-                captcha_binary = None
-                continue
-            
-            hash_digest = hashlib.sha256(captcha_binary).hexdigest()
-            filename = f"{hash_digest}.png"
-            filepath = output_dir / filename
-            filepath.write_bytes(captcha_binary)
+                    await asyncio.sleep(0.0)  # Throttle
+                finally:
+                    await page.close()
 
-            time.sleep(0.0) # Throttle
+        # TODO: shoot one new download every x seconds (1.0?) instead?
+        # TODO: reschedule failed downloads.
+        tasks = [download_one(i) for i in range(num_captchas)]
+        await asyncio.gather(*tasks)
 
-        browser.close()
+        await browser.close()
 
 
 if __name__ == "__main__":
-    import sys
     num_to_download = int(sys.argv[1]) if len(sys.argv) > 1 else 1
-
-    download_ensap_captchas(num_to_download)
+    asyncio.run(download_ensap_captchas(num_to_download))
