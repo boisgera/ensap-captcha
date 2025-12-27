@@ -71,6 +71,7 @@ async def download_ensap_captchas(num_captchas) -> None:
                     await page.close()
 
         # TODO: shoot one new download every x seconds (1.0?) instead?
+        # with a maximum of N concurrent downloads?
         # TODO: reschedule failed downloads.
         tasks = [download_one(i) for i in range(num_captchas)]
         await asyncio.gather(*tasks)
