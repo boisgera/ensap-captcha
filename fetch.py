@@ -15,7 +15,7 @@ async def fetch_captcha(page) -> bytes:
     await page.goto(
         "https://ensap.gouv.fr",
         wait_until="networkidle",
-        timeout=30000,
+        timeout=60000,
     )
     await page.wait_for_selector("ensap-captcha", timeout=10000)
     captcha_element = await page.query_selector("ensap-captcha")
@@ -47,7 +47,7 @@ async def download_ensap_captchas(num_captchas) -> None:
 
         print(f"Downloading {num_captchas} CAPTCHA images...")
 
-        semaphore = asyncio.Semaphore(5)
+        semaphore = asyncio.Semaphore(8)
         
         async def download_one(i):
             async with semaphore:
@@ -58,6 +58,7 @@ async def download_ensap_captchas(num_captchas) -> None:
                     try:
                         captcha_binary = await fetch_captcha(page)
                     except Exception as e:
+                        print(type(e))
                         print(f"Error fetching CAPTCHA: {e}")
                         return
                     
@@ -66,12 +67,13 @@ async def download_ensap_captchas(num_captchas) -> None:
                     filepath = output_dir / filename
                     filepath.write_bytes(captcha_binary)
 
-                    await asyncio.sleep(0.0)  # Throttle
+                    await asyncio.sleep(0.1)  # Throttle if needed
                 finally:
                     await page.close()
 
         # TODO: shoot one new download every x seconds (1.0?) instead?
-        # with a maximum of N concurrent downloads?
+        # with a maximum of N concurrent downloads? Or adapt dynamically
+        # on error rates?
         # TODO: reschedule failed downloads.
         tasks = [download_one(i) for i in range(num_captchas)]
         await asyncio.gather(*tasks)
